@@ -7,8 +7,18 @@ import plotly.graph_objects as go
 import plotly.express as px
 from bs4 import BeautifulSoup
 import requests
+import os
+import statsmodels.api as sm
+from requests.auth import HTTPBasicAuth
 
 st.set_page_config(page_title="Stock Stalker Alpha", layout="wide", initial_sidebar_state="expanded")
+
+# Sidebar Logo and Attribution
+with st.sidebar:
+    st.image("/mnt/data/Renixo.png", use_column_width=True)
+    st.markdown("### Under Development By")
+    st.markdown("**RENIXOR**", unsafe_allow_html=True)
+
 st.title("🧠 Stock Stalker Alpha")
 st.markdown("Analyze stock regimes using Hidden Markov Models with interactive visuals and dark mode flair.")
 
@@ -27,13 +37,15 @@ def load_data(ticker, start, end):
     df = yf.download(ticker, start=start, end=end)
     if df.empty or 'Close' not in df.columns or df['Close'].dropna().empty:
         return pd.DataFrame()
+    df = df[['Close']].copy()
     df['LogReturn'] = np.log(df['Close'] / df['Close'].shift(1))
-    df.dropna(subset=['Close', 'LogReturn'], inplace=True)
+    df.dropna(inplace=True)
+    df.columns = [col if isinstance(col, str) else col[0] for col in df.columns]  # flatten
     return df
 
 df = load_data(ticker, start_date, end_date)
-if df.empty or len(df) < n_states:
-    st.error("Insufficient or invalid data. Please revise inputs.")
+if df.empty or 'LogReturn' not in df.columns or len(df) < n_states:
+    st.error("Insufficient or invalid data. Please revise inputs or check the ticker.")
     st.stop()
 
 # Train HMM
@@ -48,12 +60,16 @@ labels = ['Bearish', 'Neutral', 'Bullish', 'Strong Bullish', 'Extreme'][:n_state
 label_map = {state: labels[i] for i, state in enumerate(sorted_states)}
 df['Regime'] = df['State'].map(label_map)
 
+df.columns = [col if isinstance(col, str) else col[0] for col in df.columns]  # flatten again if needed
+
 if show_data:
     st.dataframe(df.tail(20))
 
 # Animated Price Chart with Regimes
 st.subheader("📊 Stock Price Annotated by Regimes")
-fig_price = px.line(df, x=df.index, y="Close", color="Regime", title="Price by Regime Animation")
+df_flat = df.copy()
+df_flat.columns = [col if isinstance(col, str) else col[0] for col in df_flat.columns]
+fig_price = px.line(df_flat, x=df_flat.index, y='Close', color='Regime', title="Price by Regime Animation")
 fig_price.update_layout(template="plotly_dark")
 st.plotly_chart(fig_price, use_container_width=True)
 
@@ -98,6 +114,8 @@ st.subheader("📌 Beta vs. S&P 500")
 @st.cache_data
 def load_sp500(start, end):
     spx = yf.download("^GSPC", start=start, end=end)
+    if spx.empty or 'Close' not in spx.columns:
+        return pd.DataFrame()
     spx['LogReturn'] = np.log(spx['Close'] / spx['Close'].shift(1))
     return spx.dropna()
 
@@ -107,6 +125,7 @@ if not spx.empty:
     aligned.columns = ['StockReturn', 'SPXReturn']
     beta = np.cov(aligned['StockReturn'], aligned['SPXReturn'])[0, 1] / np.var(aligned['SPXReturn'])
     st.metric(label="Beta (vs. S&P 500)", value=f"{beta:.2f}")
+
     fig_beta = px.scatter(
         aligned, x='SPXReturn', y='StockReturn',
         trendline="ols", title="Elekta vs. S&P 500 Returns",
@@ -119,23 +138,37 @@ if not spx.empty:
 st.subheader("🗣️ Sentiment from Earnings Calls (Experimental)")
 
 def fetch_transcript_sentiment(ticker):
-    search_url = f"https://seekingalpha.com/symbol/{ticker}/earnings/transcripts"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    response = requests.get(search_url, headers=headers)
-    soup = BeautifulSoup(response.text, "html.parser")
-    articles = soup.find_all("a", href=True)
-    transcript_links = [a['href'] for a in articles if "/earnings/earnings-call-transcript" in a['href']]
+    try:
+        search_url = f"https://seekingalpha.com/symbol/{ticker}/earnings/transcripts"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(search_url, headers=headers)
+        soup = BeautifulSoup(response.text, "html.parser")
+        articles = soup.find_all("a", href=True)
+        transcript_links = [a['href'] for a in articles if "/earnings/earnings-call-transcript" in a['href']]
 
-    sentiment_score = np.random.uniform(3.5, 8.5)  # Placeholder score
-    general_summary = "Earnings calls suggest moderate confidence among executives with a focus on growth and operational efficiency."
-    return sentiment_score, general_summary
+        if not transcript_links:
+            return None, None
 
-try:
-    score, summary = fetch_transcript_sentiment(ticker.split('.')[0])
+        transcript_url = f"https://seekingalpha.com{transcript_links[0]}"
+        transcript_response = requests.get(transcript_url, headers=headers)
+        transcript_soup = BeautifulSoup(transcript_response.text, "html.parser")
+        paragraphs = transcript_soup.find_all('p')
+        transcript_text = " ".join(p.text for p in paragraphs[:20])
+
+        # Simulate score (real model would do NLP sentiment scoring)
+        sentiment_score = np.random.uniform(3.5, 8.5)
+        summary = transcript_text[:300] + "..."
+        return sentiment_score, summary
+
+    except Exception as e:
+        return None, None
+
+score, summary = fetch_transcript_sentiment(ticker.split('.')[0])
+if score is not None:
     st.metric(label="Sentiment Score (1-10)", value=f"{score:.1f}")
     st.markdown(f"**Summary:** {summary}")
-except Exception as e:
+else:
     st.warning("Sentiment data currently unavailable. Please try again later.")
 
 st.markdown("---")
-st.markdown("© 2025 Stock Stalker Alpha | Powered by Streamlit & HMM")
+st.markdown("© 2025 Stock Stalker Alpha | Under Development by Renixor")
