@@ -13,9 +13,8 @@ from requests.auth import HTTPBasicAuth
 
 st.set_page_config(page_title="Stock Stalker Alpha", layout="wide", initial_sidebar_state="expanded")
 
-# Sidebar Logo and Attribution
+# Sidebar Attribution
 with st.sidebar:
-    st.image("/mnt/data/Renixo.png", use_column_width=True)
     st.markdown("### Under Development By")
     st.markdown("**RENIXOR**", unsafe_allow_html=True)
 
